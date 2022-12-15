@@ -28,36 +28,38 @@ int main(void) {
     int fdin = dup(0); //0 es el fd input, 1 el de output y 2 el de error
     int fdout = dup(1);
     int fderr = dup(2);
-
-    //señales
+	//ignoramos inicialmente las señales
+	signal(SIGINT, SIG_IGN);
+	signal(SIGQUIT, SIG_IGN);
 
     mostrarPrompt();
 	while (fgets(buf, TAM, stdin)) {
-		//señales?
+		//de momento ignoramos las señales (si haces ctrl+c en bash no sale de la consola, luego nos interesa ignorarlas de momento)
+		signal(SIGINT, SIG_IGN);
+		signal(SIGQUIT, SIG_IGN);
+
 		line = tokenize(buf);//leemos una linea de la consola
+		
 		if (line==NULL) {
 			continue;
 		}
 		if (line->redirect_input != NULL) {
-			redireccionar(0, line->redirect_input);
+			//redireccionar(0, line->redirect_input);
 		}
 		if (line->redirect_output != NULL) {
-			redireccionar(1, line->redirect_output);
+			//redireccionar(1, line->redirect_output);
 		}
 		if (line->redirect_error != NULL) {
-			redireccionar(2, line->redirect_error);
+			//redireccionar(2, line->redirect_error);
 		}
 		if (line->background) {
-			printf("comando a ejecutarse en background\n");
+			printf("Comando a ejecutarse en background. No implementado, saliendo...\n");
+			exit(1); //no tenemos bg implementado
 		}
 
 
-		if (line->ncommands == 1){
-            unComando(buf);
-        }else{
-            //variosComandos(buf);
-			printf("varios comandos");
-        }
+		unComando(buf);//por dentro se analizará si es 1 comando.
+		//variosComandos(buf);//por dentro se analizará si son varios comandos.
 
         //ponemos entrada salida y error por defecto
         if(line->redirect_input != NULL){
@@ -72,9 +74,6 @@ int main(void) {
         
         mostrarPrompt();
 	}
-
-    
-
 	return 0;
 }
 
@@ -88,7 +87,7 @@ void mostrarPrompt(){
 }
 
 int ourCD(){
-    if (line->ncommands == 1 && !strcmp(line->commands[0].argv[0], "cd")){//si hay 1 comando y es cd (!strcmp hace q compare con 0), ejecuta el cd
+    if (!strcmp(line->commands[0].argv[0], "cd")){//si hay 1 comando() y es cd (!strcmp hace q compare con 0), ejecuta el cd
     	//printf("se detecta");
     	if (line->commands[0].argc <= 2){//se puede ejecutar el CD.
     		char *dir;
@@ -101,7 +100,6 @@ int ourCD(){
        		}else{
        			dir = line->commands[0].argv[1]; 
        		}
-
        		if (chdir(dir)!=0){
        			fprintf(stderr, "No existe el directorio %s o no es uno. Uso: cd <directorio>\n%s\n", dir, strerror(errno));
 				return 0;
@@ -116,11 +114,12 @@ int ourCD(){
     return 0;
 }
 
-void redireccionar(int n, char *cad){ //dependiendo de lo que le pasemos, hará red de entrada, salida o error
+
+
+/*void redireccionar(int n, char *cad){ //dependiendo de lo que le pasemos, hará red de entrada, salida o error
 	switch (n){
 	case 0://entrada
-		cad = "hola";
-		printf("%s", cad);
+		
 		break;
 	case 1://salida
 
@@ -132,21 +131,29 @@ void redireccionar(int n, char *cad){ //dependiendo de lo que le pasemos, hará 
 		fprintf(stderr, "Error en la redirección...\n");
 		break;
 	}
-}
+}*/
 
 void unComando(char* buffer){
-    //señales?
-    if (!ourCD()){//cd se encarga de comparar si lo que se ha ejecutado es cd como tal
+	//ahora sí, activamos las señales para que actuen por defecto
+	signal(SIGINT, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
+    if (line->ncommands==1 && !ourCD()){//cd se encarga de comparar si lo que se ha ejecutado es cd como tal
 		//si no se ha ejecutado el cd bien, habrá devuelto 0 luego entra en el if para ver si es otro comando
-		getcwd(buffer, TAM);
-		printf("Es otro comando %s\n", buffer);
+		
+		if (strcmp(line->commands[0].argv[0], "exit")==0){//contemplamos el caso en el que se teclee exit como comando :)
+			exit(0);
+		}else{
+			printf("No hizo ni cd ni exit, el directorio acutal es: %s\n", getcwd(buffer, TAM));
+			//comando cualquiera
+		}
 	}
-
 }
 
 /*
 void variosComandos(char* buffer){
-    //señales??
+    //señales también para que actúen por defecto
+	signal(SIGINT, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
     for (size_t i = 0; i < line->ncommands; i++){
         
     }
