@@ -4,6 +4,9 @@
 #include <string.h>
 #include <errno.h>
 #include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 #include "parser.h"
 
 #define AZUL_PROMPT    "\x1b[34m"
@@ -14,7 +17,7 @@
 void mostrarPrompt();
 int ourCD();
 void redireccionar(int n, char *cad);//donde n puede valer 0(in), 1(out), 2(error) y cad es una cadena(en principio no nula, para redirigir)
-void unComando(char *buffer); //contemplar CD, fg, jobs y ejecucion de un único comando
+void unComando(); //contemplar CD, fg, jobs y ejecucion de un único comando
 void variosComandos(char *buffer); //con pipes vaya
 
 
@@ -71,7 +74,6 @@ int main(void) {
         if (line->redirect_error != NULL){
             dup2(fderr, 2);
         }
-        
         mostrarPrompt();
 	}
 	return 0;
@@ -116,24 +118,21 @@ int ourCD(){
 
 
 
-/*void redireccionar(int n, char *cad){ //dependiendo de lo que le pasemos, hará red de entrada, salida o error
+void redireccionar(int n, char *cad){ //dependiendo de lo que le pasemos, hará red de entrada, salida o error
 	switch (n){
 	case 0://entrada
-		
+		dup2(open(cad, O_RDONLY | O_CREAT), n); //como si no existe el fichero de entrada lo crea, no va a dar error
 		break;
 	case 1://salida
-
+		dup2(open(cad, O_CREAT | O_WRONLY | O_TRUNC), n); //si no existe el fichero donde escribir, lo crea y si no escribe o sobreescribe
 		break;
 	case 2://error
-
-		break;
-	default:
-		fprintf(stderr, "Error en la redirección...\n");
+		dup2(open(cad, O_CREAT | O_WRONLY, errno | O_TRUNC), n);//escribirá errno en dicho fichero, si no existe lo crea
 		break;
 	}
-}*/
+}
 
-void unComando(char* buffer){
+void unComando(){
 	//ahora sí, activamos las señales para que actuen por defecto
 	signal(SIGINT, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
@@ -143,8 +142,25 @@ void unComando(char* buffer){
 		if (strcmp(line->commands[0].argv[0], "exit")==0){//contemplamos el caso en el que se teclee exit como comando :)
 			exit(0);
 		}else{
-			printf("No hizo ni cd ni exit, el directorio acutal es: %s\n", getcwd(buffer, TAM));
-			//comando cualquiera
+			int status;
+			pid_t pid = fork();
+			if (pid < 0){ //ha habido un error
+				line->redirect_error = "Se ha producido un fallo en el fork...";
+				fprintf(stderr, "Se ha producido un fallo en el fork...\n");
+				exit(1);
+			}else if (pid == 0){ //hijo
+				execvp(line->commands->argv[0], line->commands->argv);;
+				//si es exitoso, no continuará por aquí, pero puede fallar luego:
+				line->redirect_error = "Ha habido un error con la ejecucion del mandato...";
+				fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands->argv[0], line->commands->argv[0]);
+				exit(1); //salida con error
+			}else{//el padre
+				waitpid(pid, &status, 0); //esperamos por un hijo específico
+				if(WIFEXITED(status)!=0 && WEXITSTATUS(status)!=0){ //si el hijo ha terminado correctamente, se ha ejecutado el comando
+					fprintf(stderr, "Error en la ejecucion del mandato...\n");
+				}
+			}
+
 		}
 	}
 }
