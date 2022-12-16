@@ -74,6 +74,7 @@ int main(void) {
         if (line->redirect_error != NULL){
             dup2(fderr, 2);
         }
+
         mostrarPrompt();
 	}
 	return 0;
@@ -121,7 +122,6 @@ void redireccionar(int n, char *cad){ //en funcion de n, hará una u otra
 		int aux = open(cad, O_RDONLY);
 		if (aux == -1){
 			fprintf(stderr, "ourshell: %s: No existe el fichero o directorio.\n", cad);
-			exit(1);
 		}else{
 			dup2(aux, n);
 		}
@@ -131,7 +131,7 @@ void redireccionar(int n, char *cad){ //en funcion de n, hará una u otra
 		dup2(creat(cad, S_IRUSR | S_IWUSR | S_IXUSR), n); //damos permisos en este caso sólo al usuario, se puede cambiar si no desde la shell con chmod
 		break;
 	case 2://error
-		dup2(open(cad, O_CREAT | O_WRONLY, errno | O_TRUNC), n); //en este caso es igual que arriba pero nos interesa más así en este caso
+		dup2(open(cad, O_CREAT | O_WRONLY | O_TRUNC), n); //en este caso es igual que arriba pero nos interesa más así en este caso
 		break;
 	}
 }
