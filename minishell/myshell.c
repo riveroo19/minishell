@@ -47,13 +47,13 @@ int main(void) {
 			continue;
 		}
 		if (line->redirect_input != NULL) {
-			//redireccionar(0, line->redirect_input);
+			redireccionar(0, line->redirect_input);
 		}
 		if (line->redirect_output != NULL) {
-			//redireccionar(1, line->redirect_output);
+			redireccionar(1, line->redirect_output);
 		}
 		if (line->redirect_error != NULL) {
-			//redireccionar(2, line->redirect_error);
+			redireccionar(2, line->redirect_error);
 		}
 		if (line->background) {
 			printf("Comando a ejecutarse en background. No implementado, saliendo...\n");
@@ -118,16 +118,23 @@ int ourCD(){
 
 
 
-void redireccionar(int n, char *cad){ //dependiendo de lo que le pasemos, hará red de entrada, salida o error
+void redireccionar(int n, char *cad){ //en funcion de n, hará una u otra
 	switch (n){
-	case 0://entrada
-		dup2(open(cad, O_RDONLY | O_CREAT), n); //como si no existe el fichero de entrada lo crea, no va a dar error
+	case 0://entrada: bash da error si intentas hacerlo sobre un archivo que no existe, luego habrá que manejar esos posibles errores
+		int aux = open(cad, O_RDONLY);
+		if (aux == -1){
+			fprintf(stderr, "ourshell: %s: No existe el fichero o directorio.\n", cad);
+			exit(1);
+		}else{
+			dup2(aux, n);
+		}
 		break;
 	case 1://salida
-		dup2(open(cad, O_CREAT | O_WRONLY | O_TRUNC), n); //si no existe el fichero donde escribir, lo crea y si no escribe o sobreescribe
+		//dup2(open(cad, O_CREAT | O_WRONLY | O_TRUNC), n); no otorga permisos de usuario en caso de crear un nuevo archivo, luego hacemos un creat mejor
+		dup2(creat(cad, S_IRUSR | S_IWUSR | S_IXUSR), n); //damos permisos en este caso sólo al usuario, se puede cambiar si no desde la shell con chmod
 		break;
 	case 2://error
-		dup2(open(cad, O_CREAT | O_WRONLY, errno | O_TRUNC), n);//escribirá errno en dicho fichero, si no existe lo crea
+		dup2(open(cad, O_CREAT | O_WRONLY, errno | O_TRUNC), n); //en este caso es igual que arriba pero nos interesa más así en este caso
 		break;
 	}
 }
