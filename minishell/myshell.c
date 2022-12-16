@@ -103,15 +103,12 @@ int ourCD(){
        			dir = line->commands[0].argv[1]; 
        		}
        		if (chdir(dir)!=0){
-       			fprintf(stderr, "No existe el directorio %s o no es uno. Uso: cd <directorio>\n%s\n", dir, strerror(errno));
-				return 0;
-       		}else{
-				return 1;
-			}
+       			fprintf(stderr, "No existe el directorio %s o no es uno. Uso: cd <directorio>\n", dir);
+       		}
     	}else{
         	fprintf(stderr,"Muchos argumentos. Uso: cd <directorio>\n"); //pone no such file or directory, luego no imprimimos el strerror
-			return 0;
         }
+		return 1; //ha ejecutado cd, si no ha funcionado ya es otra cosa...
     }
     return 0;
 }
@@ -143,8 +140,8 @@ void unComando(){
 	//ahora sí, activamos las señales para que actuen por defecto
 	signal(SIGINT, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
-    if (line->ncommands==1 && !ourCD()){//cd se encarga de comparar si lo que se ha ejecutado es cd como tal
-		//si no se ha ejecutado el cd bien, habrá devuelto 0 luego entra en el if para ver si es otro comando
+    if (line->ncommands==1 && ourCD()==0){//cd se encarga de comparar si lo que se ha ejecutado es cd como tal
+		//si es cd lo que se ha introducido por pantalla, habrá devuelto 0 luego entra en el if para ver si es otro comando
 		
 		if (strcmp(line->commands[0].argv[0], "exit")==0){//contemplamos el caso en el que se teclee exit como comando :)
 			exit(0);
