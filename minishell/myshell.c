@@ -15,10 +15,12 @@
 #define TAM 1024
 
 void mostrarPrompt();
+void handler(int signal);
 int ourCD();
-void redireccionar(int n, char *cad);//donde n puede valer 0(in), 1(out), 2(error) y cad es una cadena(en principio no nula, para redirigir)
+void redireccionar(int n, char *cad);//donde n puede valer 0(in), 1(out), 2(error) y cad es una cadena
 void unComando(); //contemplar CD, fg, jobs y ejecucion de un único comando
-void variosComandos(char *buffer); //con pipes vaya
+void variosComandos(); //con pipes vaya
+
 
 
 tline * line; //global para acceder desde el cd...
@@ -31,15 +33,14 @@ int main(void) {
     int fdin = dup(0); //0 es el fd input, 1 el de output y 2 el de error
     int fdout = dup(1);
     int fderr = dup(2);
+	
 	//ignoramos inicialmente las señales
 	signal(SIGINT, SIG_IGN);
 	signal(SIGQUIT, SIG_IGN);
 
     mostrarPrompt();
 	while (fgets(buf, TAM, stdin)) {
-		//de momento ignoramos las señales (si haces ctrl+c en bash no sale de la consola, luego nos interesa ignorarlas de momento)
-		signal(SIGINT, SIG_IGN);
-		signal(SIGQUIT, SIG_IGN);
+		
 
 		line = tokenize(buf);//leemos una linea de la consola
 		
@@ -61,10 +62,10 @@ int main(void) {
 		}
 
 
-		unComando(buf);//por dentro se analizará si es 1 comando.
-		//variosComandos(buf);//por dentro se analizará si son varios comandos.
+		unComando();//por dentro se analizará si es 1 comando.
+		variosComandos();//por dentro se analizará si son varios comandos.
 
-        //ponemos entrada salida y error por defecto
+        //ponemos entrada salida y error a su fd por defecto, en caso de redirección
         if(line->redirect_input != NULL){
             dup2(fdin, 0);
         }
@@ -76,6 +77,9 @@ int main(void) {
         }
 
         mostrarPrompt();
+		//volvemos a ignorar las señales
+		signal(SIGINT, SIG_IGN);
+		signal(SIGQUIT, SIG_IGN);
 	}
 	return 0;
 }
@@ -87,6 +91,13 @@ void mostrarPrompt(){
     printf(NORMAL":");
     printf(AZUL_PROMPT"~%s", aux);
     printf(NORMAL"$ ");
+}
+
+void handler(int signal){
+	if (signal == SIGINT){
+		printf("\n");
+		return;
+	}
 }
 
 int ourCD(){
@@ -122,16 +133,17 @@ void redireccionar(int n, char *cad){ //en funcion de n, hará una u otra
 		int aux = open(cad, O_RDONLY);
 		if (aux == -1){
 			fprintf(stderr, "ourshell: %s: No existe el fichero o directorio.\n", cad);
+			return;
 		}else{
-			dup2(aux, n);
+			dup2(aux, STDIN_FILENO);
 		}
 		break;
-	case 1://salida
-		//dup2(open(cad, O_CREAT | O_WRONLY | O_TRUNC), n); no otorga permisos de usuario en caso de crear un nuevo archivo, luego hacemos un creat mejor
-		dup2(creat(cad, S_IRUSR | S_IWUSR | S_IXUSR), n); //damos permisos en este caso sólo al usuario, se puede cambiar si no desde la shell con chmod
+	case 1://salida: bash crea un archivo si no existe, luego lo crearemos
+		//dup2(open(cad, O_CREAT | O_WRONLY | O_TRUNC), n); no otorga permisos de usuario en caso de crear un nuevo archivo, luego hacemos un creat mejor (o podríamos)
+		dup2(creat(cad, S_IRUSR | S_IWUSR | S_IXUSR), STDOUT_FILENO); //damos permisos en este caso sólo al usuario, se puede cambiar si no desde la shell con chmod
 		break;
 	case 2://error
-		dup2(open(cad, O_CREAT | O_WRONLY | O_TRUNC), n); //en este caso es igual que arriba pero nos interesa más así en este caso
+		dup2(open(cad, O_CREAT | O_WRONLY, errno | O_TRUNC), STDERR_FILENO); //en este caso es igual que arriba pero nos interesa más así en este caso
 		break;
 	}
 }
@@ -149,37 +161,96 @@ void unComando(){
 			int status;
 			pid_t pid = fork();
 			if (pid < 0){ //ha habido un error
-				line->redirect_error = "Se ha producido un fallo en el fork...";
 				fprintf(stderr, "Se ha producido un fallo en el fork...\n");
 				exit(1);
 			}else if (pid == 0){ //hijo
 				execvp(line->commands->argv[0], line->commands->argv);;
 				//si es exitoso, no continuará por aquí, pero puede fallar luego:
-				line->redirect_error = "Ha habido un error con la ejecucion del mandato...";
 				fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands->argv[0], line->commands->argv[0]);
 				exit(1); //salida con error
 			}else{//el padre
 				waitpid(pid, &status, 0); //esperamos por un hijo específico
-				if(WIFEXITED(status)!=0 && WEXITSTATUS(status)!=0){ //si el hijo ha terminado correctamente, se ha ejecutado el comando
-					fprintf(stderr, "Error en la ejecucion del mandato...\n");
+				if(WIFEXITED(status)!=0){
+					if (WEXITSTATUS(status)!=0){ //si el hijo ha terminado correctamente, se ha ejecutado el comando
+						fprintf(stderr, "Error en la ejecucion del mandato...\n");
+					}
 				}
 			}
 
 		}
-	}
+	} 
 }
 
-/*
-void variosComandos(char* buffer){
+
+void variosComandos(){
     //señales también para que actúen por defecto
 	signal(SIGINT, SIG_DFL);
 	signal(SIGQUIT, SIG_DFL);
-    for (size_t i = 0; i < line->ncommands; i++){
-        
-    }
-    
+    if (line->ncommands>1){
+		pid_t pid;
+		int status;
+		int npipes = line->ncommands-1; //si hay n comandos habrá n-1 pipes
+
+		int **pids_hijos = (int**)malloc(sizeof (int*) * npipes);
+		for (int i = 0; i < npipes; i++){
+			pids_hijos[i] = (int *)malloc(sizeof(int)*2);
+			pipe(pids_hijos[i]); //las filas son los pipes y cada una de sus columnas sus entradas y salidas respectivas
+		}
+
+		for (int i = 0; i <= npipes; i++){
+			
+			pid = fork();
+			if (pid<0){
+				fprintf(stderr, "Se ha producido un fallo en uno de los hijos: %s\n", strerror(errno));
+				exit(1);			
+			}else if (pid == 0){ //if para la creación de hijos
+				
+				if (i==0){//creamos el primer hijo, que coge el imput de STDIN_FILENO, su descriptor de ficheros y lo pondrá en stdout del pipe, para que el siguiente hijo pueda coger su entrada de ahí proximamente
+					close(pids_hijos[i][0]);//cerramos el imput
+					dup2(pids_hijos[i][1], STDOUT_FILENO); 
+					
+
+					execvp(line->commands[i].argv[0], line->commands[i].argv);
+					//si falla, como siempre salta aquí
+					fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands[0].argv[0], line->commands[0].argv[0]);
+					exit(1);
+				}else if (i!=npipes && i!=0) {//creación de hijos intermedios, si hay más de 1 pipe; cogen su input de las salidas de otros pipes y lo pone en su salida para que el siguiente hijo lo pueda recibir, gracias a su pipe
+					close(pids_hijos[i-1][1]);
+					close(pids_hijos[i][0]);
+					dup2(pids_hijos[i-1][0], STDIN_FILENO);
+					dup2(pids_hijos[i][1], STDOUT_FILENO);
+					
+					execvp(line->commands[i].argv[0], line->commands[i].argv);
+
+					fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands[i].argv[0], line->commands[i].argv[0]);
+					exit(1);
+				}else if (i==npipes){//último hijo que debe dejar el imput recibido del anterior hijo en STDOUT_FILENO, para que pueda mostrar por pantalla el resultado final
+					close(pids_hijos[i-1][1]);
+					dup2(pids_hijos[i-1][0], STDIN_FILENO);
+					
+
+					execvp(line->commands[npipes].argv[0], line->commands[npipes].argv);
+
+					fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands[0].argv[0], line->commands[0].argv[0]);
+					exit(1);
+				}
+			}else{//será el padre
+				if (!(i==npipes)){
+					close(pids_hijos[i][1]);
+				}
+			}
+		}
+		for (int i = 0; i < npipes; i++){
+			waitpid(pid, &status, 0);
+		}
+		for (int i = 0; i < npipes; i++){
+			free(pids_hijos[i]);
+		}
+		free(pids_hijos);
+		
+	}
 }
-*/
+
 
 
 //Realizado por Javier Rivero Mayorga y Javier Valsera Castro
