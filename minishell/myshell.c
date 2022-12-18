@@ -15,13 +15,16 @@
 #define TAM 1024
 
 void mostrarPrompt();
-void handler(int signal);
+void handler(int sig);
 int ourCD();
 void redireccionar(int n, char *cad);//donde n puede valer 0(in), 1(out), 2(error) y cad es una cadena
 void unComando(); //contemplar CD, fg, jobs y ejecucion de un único comando
 void variosComandos(); //con pipes vaya
 
-
+//funciones lista de mandatos en bg para el jobs
+//comprobar bg, si está en bg haríamos cosas con la lista y ese mandato
+//createjob, createjoblist, addjob, showjobs, freejoblist, deletejob...
+//
 
 tline * line; //global para acceder desde el cd...
 
@@ -35,8 +38,8 @@ int main(void) {
     int fderr = dup(2);
 	
 	//ignoramos inicialmente las señales
-	signal(SIGINT, SIG_IGN);
-	signal(SIGQUIT, SIG_IGN);
+	signal(SIGINT, handler); //handleamos las señales para que se ignoren y vuelvan a mostrar el prompt inicialmente
+	signal(SIGQUIT, handler);
 
     mostrarPrompt();
 	while (fgets(buf, TAM, stdin)) {
@@ -78,8 +81,8 @@ int main(void) {
 
         mostrarPrompt();
 		//volvemos a ignorar las señales
-		signal(SIGINT, SIG_IGN);
-		signal(SIGQUIT, SIG_IGN);
+		signal(SIGINT, handler);
+		signal(SIGQUIT, handler);
 	}
 	return 0;
 }
@@ -93,11 +96,12 @@ void mostrarPrompt(){
     printf(NORMAL"$ ");
 }
 
-void handler(int signal){
-	if (signal == SIGINT){
+void handler(int sig){
+	if (sig == SIGINT){
 		printf("\n");
-		return;
+		//mostrarPrompt();
 	}
+	return;
 }
 
 int ourCD(){
@@ -149,9 +153,7 @@ void redireccionar(int n, char *cad){ //en funcion de n, hará una u otra
 }
 
 void unComando(){
-	//ahora sí, activamos las señales para que actuen por defecto
-	signal(SIGINT, SIG_DFL);
-	signal(SIGQUIT, SIG_DFL);
+	
     if (line->ncommands==1 && ourCD()==0){//cd se encarga de comparar si lo que se ha ejecutado es cd como tal
 		//si es cd lo que se ha introducido por pantalla, habrá devuelto 0 luego entra en el if para ver si es otro comando
 		
@@ -164,6 +166,8 @@ void unComando(){
 				fprintf(stderr, "Se ha producido un fallo en el fork...\n");
 				exit(1);
 			}else if (pid == 0){ //hijo
+				signal(SIGINT, SIG_DFL);//ponemos esto aquí por si sucede un sleep, por ejemplo, lo haga por defecto
+				signal(SIGQUIT, SIG_DFL);
 				execvp(line->commands->argv[0], line->commands->argv);;
 				//si es exitoso, no continuará por aquí, pero puede fallar luego:
 				fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands->argv[0], line->commands->argv[0]);
