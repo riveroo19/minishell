@@ -15,11 +15,11 @@
 #define TAM 1024
 
 void mostrarPrompt();
-void handler(int sig);
+void handler(int sig); //manejador de señales para ejecutarlas correctamente
 int ourCD();
 void redireccionar(int n, char *cad);//donde n puede valer 0(in), 1(out), 2(error) y cad es una cadena
 void unComando(); //contemplar CD, fg, jobs y ejecucion de un único comando
-void variosComandos(); //con pipes vaya
+void variosComandos(); //comandos con pipes vaya
 
 //funciones lista de mandatos en bg para el jobs
 //comprobar bg, si está en bg haríamos cosas con la lista y ese mandato
@@ -210,27 +210,28 @@ void variosComandos(){
 			}else if (pid == 0){ //if para la creación de hijos
 				
 				if (i==0){//creamos el primer hijo, que coge el imput de STDIN_FILENO, su descriptor de ficheros y lo pondrá en stdout del pipe, para que el siguiente hijo pueda coger su entrada de ahí proximamente
-					close(pids_hijos[i][0]);//cerramos el imput
 					dup2(pids_hijos[i][1], STDOUT_FILENO); 
-					
+					close(pids_hijos[i][0]);//cerramos el imput
+					//primero el dup y luego ya cerramos el imput para evitar errores
 
 					execvp(line->commands[i].argv[0], line->commands[i].argv);
 					//si falla, como siempre salta aquí
 					fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands[0].argv[0], line->commands[0].argv[0]);
 					exit(1);
 				}else if (i!=npipes && i!=0) {//creación de hijos intermedios, si hay más de 1 pipe; cogen su input de las salidas de otros pipes y lo pone en su salida para que el siguiente hijo lo pueda recibir, gracias a su pipe
-					close(pids_hijos[i-1][1]);
-					close(pids_hijos[i][0]);
 					dup2(pids_hijos[i-1][0], STDIN_FILENO);
 					dup2(pids_hijos[i][1], STDOUT_FILENO);
+					close(pids_hijos[i-1][1]);
+					close(pids_hijos[i][0]);
+					
 					
 					execvp(line->commands[i].argv[0], line->commands[i].argv);
 
 					fprintf(stderr, "%s no es un mandato valido o su sintaxis no es correcta, prueba a hacer man %s.\n", line->commands[i].argv[0], line->commands[i].argv[0]);
 					exit(1);
 				}else if (i==npipes){//último hijo que debe dejar el imput recibido del anterior hijo en STDOUT_FILENO, para que pueda mostrar por pantalla el resultado final
-					close(pids_hijos[i-1][1]);
 					dup2(pids_hijos[i-1][0], STDIN_FILENO);
+					close(pids_hijos[i-1][1]);
 					
 
 					execvp(line->commands[npipes].argv[0], line->commands[npipes].argv);
@@ -239,12 +240,12 @@ void variosComandos(){
 					exit(1);
 				}
 			}else{//será el padre
-				if (!(i==npipes)){
+				if (!(i==npipes)){//cerramos todos los pipes
 					close(pids_hijos[i][1]);
 				}
 			}
 		}
-		for (int i = 0; i < npipes; i++){
+		for (int i = 0; i < npipes; i++){//esperamos hijo a hijo
 			waitpid(pid, &status, 0);
 		}
 		for (int i = 0; i < npipes; i++){
